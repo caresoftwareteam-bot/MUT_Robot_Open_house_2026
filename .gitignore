@@ -16,3 +16,5 @@ Thumbs.db
 
 # Fritzing Project
 Untitled Sketch 2.fzz
+# Android APK
+app/*.apk

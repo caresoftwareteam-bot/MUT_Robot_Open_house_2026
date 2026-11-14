@@ -41,6 +41,34 @@
 - **ESP32-S3 Failsafe:** Joystick Timeout `350 ms` และส่ง STOP ซ้ำทุก `100 ms` เมื่อหยุด
 - **STM32 Failsafe:** Motor Command Timeout `500 ms` โดย Heartbeat ไม่ต่ออายุการขับเคลื่อน
 
+
+## 📱 Android Application
+
+<p align="center">
+  <img src="docs/images/app_icon.jpg" alt="MUT Robot Controller App Icon" width="96">
+</p>
+
+แอปพลิเคชันสำหรับควบคุมหุ่นยนต์ผ่าน Wi-Fi / TCP
+
+**ดาวน์โหลดแอปพลิเคชัน Android**
+
+[📥 Download APK](app/robotcontroller.apk)
+
+**สแกน QR Code เพื่อดาวน์โหลด**
+
+<p align="center">
+  <img src="docs/images/qrcode_robotcontroller.png"
+       alt="MUT Robot Android App QR Code"
+       width="200">
+</p>
+
+### วิธีใช้งาน
+
+1. ดาวน์โหลดและติดตั้งไฟล์ APK บนอุปกรณ์ Android
+2. เชื่อมต่อ Wi-Fi ของหุ่นยนต์ (`MUT_robot_XXXX`)
+3. เปิดแอปและเชื่อมต่อกับ ESP32-S3
+4. ใช้ Joystick ควบคุมการเคลื่อนที่และหยุดหุ่นยนต์
+
 ## 🛠️ ฮาร์ดแวร์และเอกสาร
 
 ### บอร์ดที่ใช้งานจริง
