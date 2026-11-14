@@ -52,7 +52,7 @@
 
 **ดาวน์โหลดแอปพลิเคชัน Android**
 
-[📥 Download APK](app/robotcontroller.apk)
+[📥 ดาวน์โหลด Robot Controller APK (Google Drive)](https://drive.google.com/file/d/1SmlgpZTPX4050RUFfEwLvRmpuiBsYC0t/view?usp=drive_link)
 
 **สแกน QR Code เพื่อดาวน์โหลด**
 
