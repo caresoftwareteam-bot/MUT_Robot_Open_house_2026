@@ -1,0 +1,18 @@
+
+# PlatformIO
+.pio/
+
+# CMake Build
+build/
+cmake-build-*/
+
+# Temporary Files
+*.log
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Fritzing Project
+Untitled Sketch 2.fzz
