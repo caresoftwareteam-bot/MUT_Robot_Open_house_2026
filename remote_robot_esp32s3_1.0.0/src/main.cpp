@@ -27,7 +27,6 @@
  * - NeoPixel RGB Status Indicator
  */
 
-
 #define Firmware_Version "1.0.0"
 
 #include <Arduino.h>
@@ -68,15 +67,16 @@ Adafruit_NeoPixel rgb(1, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 #define WIFI_AP_CHANNEL 1U
 #define WIFI_MAX_CLIENTS 1U
 
-static const char *get_serial_number()
+const static char *get_serial_number()
 {
-  static char serial_number[32] = {0};
-  if (!serial_number[0])
-  {
-    uint64_t chipid = ESP.getEfuseMac();
-    snprintf(serial_number, sizeof(serial_number), "MUT_robot_%04X",
-             (unsigned int)(chipid & 0xFFFFU));
-  }
+  static char serial_number[20]; // MUT_robot_xxxxxx + null terminator
+
+  if (serial_number[0] != '\0')
+    return serial_number;
+
+  uint64_t chipid = ESP.getEfuseMac(); // The chip ID is essentially its MAC address(length: 6 bytes).
+  snprintf(serial_number, sizeof(serial_number), "MUT_robot_%04X%08X", (uint16_t)(chipid >> 32), (uint32_t)chipid);
+
   return serial_number;
 }
 
@@ -188,8 +188,8 @@ static void Motor_Control(int x, int y)
     return;
   }
 
-  int left = x + y;
-  int right = x - y;
+  int left = x - y;
+  int right = x + y;
   int peak = max(abs(left), abs(right));
   if (peak > 100)
   {
@@ -340,6 +340,7 @@ void setup()
   Serial.printf("[INFO] START MUT REMODELED ROBOT CONTROLLER FIRMWARE\r\n");
   Serial.printf("[INFO] Firmware Version: %s\r\n", Firmware_Version);
   Serial.printf("[INFO] Build Date: %s %s\r\n", __DATE__, __TIME__);
+  Serial.printf("[INFO] Serial Number: %s\r\n", get_serial_number());
 
   WiFi.mode(WIFI_AP);
 
