@@ -1,56 +1,95 @@
-# 🤖 MUT Robot 2026 — ESP32-S3 Communication Controller
+# 🤖 MUT Robot 2026 — ESP32-S3 Web Communication Controller
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue) ![Framework](https://img.shields.io/badge/framework-Arduino-00979D) ![MCU](https://img.shields.io/badge/MCU-ESP32--S3-555555)
 
-เฟิร์มแวร์สำหรับ **ESP32-S3 N16R8** ทำหน้าที่เป็นตัวกลางสื่อสารระหว่างแอปควบคุมหุ่นยนต์ผ่าน Wi-Fi กับบอร์ด **STM32F446RCTx Motor Controller** โดยรับคำสั่ง Joystick ทาง TCP แปลงเป็นคำสั่งมอเตอร์แบบ Differential Drive และส่ง Packet 8 ไบต์ผ่าน UART พร้อม CRC-8
+เฟิร์มแวร์สำหรับ **ESP32-S3 N16R8** ทำหน้าที่เป็น Wi-Fi Access Point และ Web Controller สำหรับหุ่นยนต์ โดยให้ผู้ใช้ควบคุมผ่าน Web App (HTML/CSS/JavaScript) ที่เก็บใน LittleFS ส่งคำสั่งผ่าน WebSocket ไปยัง ESP32-S3 เพื่อคำนวณ Differential Drive และส่ง UART Packet พร้อม CRC-8 ไปยัง **STM32F446RCTx Motor Controller**
 
-พัฒนาสำหรับงาน **MUT Robot Open House 2026 (18 November 2026)**
+พัฒนาสำหรับ **MUT Robot Open House 2026 (18 November 2026)**
 
-> **Architecture:** ESP32-S3 รับคำสั่งและคำนวณความเร็วของมอเตอร์; STM32F446RCTx เป็นผู้สร้าง PWM และขับมอเตอร์ผ่าน DRV8833PWR โดยตรง
+> **Architecture:** ESP32-S3 รับคำสั่งและคำนวณความเร็ว/ทิศทางมอเตอร์ ส่วน STM32F446RCTx สร้าง PWM และขับมอเตอร์ผ่าน DRV8833PWR
 
 ## ✨ Features / คุณสมบัติ
 
-- Wi-Fi **Access Point (AP)** โดยตั้ง SSID เป็น `MUT_robot_XXXX` จาก 16 บิตล่างของ eFuse MAC
-- TCP Socket Server ที่ **Port 8080** สำหรับรับคำสั่ง Joystick
-- รับข้อความรูปแบบ `[X,Y]\n` โดยแต่ละแกนอยู่ในช่วง `-100` ถึง `100`
-- Differential Drive (Tank Mixing) สำหรับมอเตอร์ซ้าย/ขวา พร้อม Normalize ไม่เกิน 100%
-- สื่อสารกับ STM32 ผ่าน UART ที่ **115200 baud, 8N1**
-- Protocol ขนาด **8 bytes** ตรวจสอบด้วย **CRC-8 (poly 0x07)**
-- ส่ง STOP ทันทีเมื่อ Joystick อยู่ที่ศูนย์
-- Joystick Command Timeout **350 ms** เพื่อสั่งหยุดเมื่อขาดคำสั่ง
-- ส่ง Heartbeat ขณะรถกำลังเคลื่อนที่ หรือส่ง STOP ซ้ำขณะหยุด ทุก **100 ms** เมื่อ TCP Client เชื่อมต่อ
-- NeoPixel RGB แสดงสถานะการเชื่อมต่อ การเคลื่อนที่ และ Failsafe
-- รองรับ TCP Client ที่ใช้งานอยู่หนึ่งราย; ปฏิเสธการเชื่อมต่อเพิ่มเติม
+- Wi-Fi **Access Point (AP)** ชื่อ `MUT_robot_XXXX` โดยใช้ 16 บิตล่างของ eFuse MAC
+- จำกัด Wi-Fi AP สูงสุด **1 Device (Single Station)** บน Channel 1
+- จำกัด WebSocket **1 Active Controller** เพื่อป้องกันการควบคุมซ้อนกัน
+
+- **HTTP Web Server (Port 80)** สำหรับให้บริการ Web App จาก **LittleFS**
+
+- **WebSocket Server (Port 81)** สำหรับรับคำสั่ง `[X,Y]` จาก D-Pad และ Virtual Joystick
+
+- Web App ออกแบบให้ใช้งานในแนวนอน (**Landscape**) พร้อมไฟล์ PWA Manifest สำหรับอุปกรณ์/เบราว์เซอร์ที่รองรับ
+
+- ปรับ Speed ได้ตั้งแต่ 0–100% และส่งคำสั่งซ้ำทุก **100 ms** ระหว่างควบคุม
+
+- Differential Drive (Tank Mixing) พร้อม Normalize ความเร็วไม่เกิน 100%
+
+- UART ไป STM32 ที่ **115200 baud, 8N1** และ Packet **8 bytes** พร้อม **CRC-8 polynomial `0x07`**
+
+- ส่ง STOP เมื่อปล่อยปุ่ม/Joystick, รับ `[0,0]`, หรือ WebSocket Client ตัดการเชื่อมต่อ
+
+- **Command Timeout Failsafe 350 ms** ขณะมอเตอร์กำลังทำงาน
+
+- NeoPixel RGB แสดงสถานะ Wi-Fi, Client, Motor และ Failsafe
+
+- อนุญาต WebSocket Controller ที่ใช้งานอยู่ **1 Client**; ปฏิเสธ Client เพิ่มด้วยข้อความ `BUSY`
 
 ## 🧠 System Architecture
 
 ```text
-   Android App / TCP Joystick Client
-                 |
-            Wi-Fi (AP)
-                 |
-          TCP Port 8080
-                 |
-        +----------------+
-        | ESP32-S3 N16R8 |
-        | Joystick Parse |
-        | Motor Mixing   |
-        | CRC-8 Encode   |
-        +----------------+
-                 |
-         UART1 TX GPIO17
-         115200 baud, 8N1
-                 |
-         STM32 USART1 RX
-                 |
-       +------------------+
-       | STM32F446RCTx    |
-       | PWM TIM3 / TIM4  |
-       +------------------+
-                 |
-              DRV8833
-                 |
-            DC Motors x2
+
+Mobile / PC Browser
+
+  └── Robot Web App (HTML / CSS / JavaScript)
+
+        ├── D-Pad / Virtual Joystick / Speed
+
+        └── WebSocket [X,Y] (Port 81)
+
+                    |
+
+             Wi-Fi Access Point (Channel 1 / Max 1 Device)
+
+                    |
+
+              ESP32-S3 N16R8
+
+              ├── HTTP :80 / LittleFS
+
+              ├── WebSocket :81
+
+              ├── Joystick Parser
+
+              ├── Differential Drive
+
+              ├── Safety / Failsafe
+
+              └── UART Packet + CRC-8
+
+                    |
+
+            UART1 TX GPIO17
+
+            115200 baud, 8N1
+
+                    |
+
+            STM32 USART1 RX
+
+                    |
+
+             STM32F446RCTx
+
+             PWM TIM3 / TIM4
+
+                    |
+
+               DRV8833PWR
+
+                    |
+
+               DC Motors ×2
+
 ```
 
 ## 🛠 Hardware / ฮาร์ดแวร์
@@ -59,78 +98,119 @@
 |---|---|
 | Main MCU | ESP32-S3 N16R8 |
 | Motor Controller | STM32F446RCTx (separate board) |
-| Motor Driver | DRV8833PWR (connected to STM32) |
-| Status LED | On-board NeoPixel (GPIO48) |
-| Programming / Debug | USB Serial, 115200 baud |
+| Motor Driver | DRV8833PWR (controlled by STM32) |
+| Status LED | On-board NeoPixel, GPIO48 |
+| Debug | USB Serial Monitor, 115200 baud |
 
 ### 🔌 UART Wiring
 
 | ESP32-S3 | STM32F446RCTx | Purpose |
 |---|---|---|
-| GPIO17 (UART1 TX) | PA10 (USART1 RX) | Motor control packets — required |
-| GPIO18 (UART1 RX) | PA9 (USART1 TX) | Optional reverse UART path; not used by current control logic |
-| GND | GND | Common signal ground — required |
+| GPIO17 (UART1 TX) | STM32 USART1 RX (verify board pin assignment) | Motor control packets |
+| GPIO18 (UART1 RX) | STM32 USART1 TX (verify board pin assignment) | Optional reverse path; not used by current logic |
+| GND | GND | Common signal ground |
 
-**Important:** ใช้สัญญาณ UART ระดับ **3.3V TTL** และต้องต่อ GND ร่วมกัน ห้ามต่อ UART เข้ากับแรงดัน RS-232 โดยตรง
+> ใช้ UART ระดับ **3.3 V TTL** และต่อ GND ร่วมกัน ห้ามต่อกับสัญญาณ RS-232 โดยตรง ตรวจสอบตำแหน่งขา USART1 บนบอร์ด STM32 จริงก่อนต่อสาย (สำหรับ STM32F446 โดยทั่วไป PA9 เป็น USART1_TX และ PA10 เป็น USART1_RX)
 
-## 📶 Wi-Fi & TCP Configuration
+## 📶 Wi-Fi & Web Configuration
 
 | Parameter | Value |
 |---|---|
 | Wi-Fi mode | `WIFI_AP` |
-| SSID | `MUT_robot_XXXX` (derived from ESP32 eFuse MAC) |
+| Wi-Fi Channel | `1` |
+| Maximum AP Clients | `1` Device (Single Station) |
+| SSID | `MUT_robot_XXXX` (derived from eFuse MAC) |
 | Password | `12345678` |
-| TCP Port | `8080` |
-| TCP message termination | `\n` (accepts `\r\n`) |
-| Receive buffer | 64 bytes |
-| Maximum active controlling client | 1 |
-| Joystick timeout | 350 ms |
-| Periodic UART transmission | 100 ms |
+| Default AP IP used by Web App | `192.168.4.1` (verify in Serial Monitor) |
+| HTTP Port | `80` |
+| WebSocket Port | `81` |
+| WebSocket Command | `[X,Y]` (text message, no newline required) |
+| Command Range | Integer `-100` to `100` per axis |
+| Maximum active WebSocket Controller | `1` Connection |
+| Command Timeout | 350 ms |
+| Web App Repeat Interval | 100 ms |
+| Periodic UART Heartbeat / STOP | 100 ms while client connected |
 
-> ตรวจสอบ IP Address ของ AP จาก Serial Monitor บรรทัด `[WIFI] SSID: ... IP: ...` แทนการสมมติ IP ในแอป
+หลังเชื่อมต่อ Wi-Fi ของหุ่นยนต์ ให้เปิด `http://192.168.4.1/` หรือใช้ IP ที่แสดงใน Serial Monitor จากนั้นระบุ IP และ **WebSocket Port 81** ใน Web App แล้วกด **Connect Robot**
+
+> แอป Flutter เดิมใช้ TCP Socket Port 8080 แต่ **Firmware ปัจจุบันใช้ WebSocket Port 81** จึงไม่สามารถใช้ TCP Client เดิมเชื่อมต่อแทน WebSocket ได้โดยตรง
+
+### 🔒 Single Device Connection Policy
+
+ระบบจำกัดการเชื่อมต่อ **Wi-Fi AP สูงสุด 1 Device** ด้วย `WIFI_MAX_CLIENTS = 1` และใช้ `WIFI_AP_CHANNEL = 1` เพื่อป้องกันอุปกรณ์หลายเครื่องเชื่อมต่อ AP พร้อมกัน ขณะที่ WebSocket Server ยังคงอนุญาต **Active Controller สูงสุด 1 Connection** โดยปฏิเสธ Connection เพิ่มด้วยข้อความ `BUSY`
+
+- เมื่อ Device A เชื่อมต่อ Wi-Fi AP แล้ว Device B จะไม่สามารถเชื่อมต่อ AP เพิ่มได้ในขณะที่ช่องเชื่อมต่อเต็ม
+- เมื่อ Device A ตัด Wi-Fi และ AP ตรวจพบการตัดการเชื่อมต่อ Device อื่นจึงสามารถเชื่อมต่อได้
+- เมื่อ Active WebSocket Controller ตัดการเชื่อมต่อ Firmware จะส่งคำสั่ง STOP ตาม Logic เดิมและคืนสิทธิ์ให้ WebSocket Connection ใหม่
+- การจำกัดจำนวน Device **ไม่ใช่การยืนยันตัวตนหรือการผูกสิทธิ์กับผู้ใช้ถาวร** ผู้ที่ทราบรหัสผ่านยังสามารถเชื่อมต่อได้เมื่อ AP ว่าง
+- การตัด Wi-Fi ไม่จำเป็นต้องทำให้ WebSocket Disconnect ถูกตรวจพบทันที จึงยังต้องอาศัย Failsafe เดิมและ Motor Timeout ของ STM32
+
+**การตั้งค่าใน `main.cpp`:**
+
+```cpp
+#define WIFI_AP_CHANNEL 1U
+#define WIFI_MAX_CLIENTS 1U
+
+WiFi.mode(WIFI_AP);
+if (!WiFi.softAP(ssid, password, WIFI_AP_CHANNEL, 0, WIFI_MAX_CLIENTS)) {
+    Serial.println("[WIFI] AP failed");
+    // ใช้ Error Handler เดิมของ Firmware
+}
+```
+
+> ตัวอย่างด้านบนแสดงเฉพาะการกำหนด AP Parameters; ให้คง Error Handler และ LED Blink ของ Firmware เดิมไว้
+
+### 📱 Landscape / PWA
+
+Web App ออกแบบสำหรับการใช้งานแนวนอน (Landscape) โดยกำหนด `"orientation": "landscape"` และ `"display": "fullscreen"` ใน `manifest.webmanifest` สำหรับอุปกรณ์ที่รองรับ PWA ทั้งนี้ **การเปิดผ่าน Browser ปกติไม่รับประกันว่าจะล็อกแนวนอนได้** และ HTTP ของ ESP32 อาจมีข้อจำกัดด้านการติดตั้ง PWA หากจำเป็นให้หมุนหน้าจอด้วยตนเอง
 
 ## 🎮 Joystick Command Format
 
-แอปส่งข้อความ ASCII / UTF-8 ในรูปแบบ:
+WebSocket text message:
 
 ```text
-[X,Y]\n
+
+[X,Y]
+
 ```
 
-ตัวอย่าง:
+**X = เดินหน้า/ถอยหลัง**, **Y = เลี้ยวขวา/ซ้าย** โดยใช้ Mapping ตามแอป Flutter ต้นฉบับ
 
-```text
-[100,0]
-[-100,0]
-[0,100]
-[0,-100]
-[0,0]
-```
+| Control | X | Y | Message at 100% Speed |
+|---|---:|---:|---|
+| เดินหน้า | +100 | 0 | `[100,0]` |
+| ถอยหลัง | -100 | 0 | `[-100,0]` |
+| เลี้ยวซ้าย | 0 | -100 | `[0,-100]` |
+| เลี้ยวขวา | 0 | +100 | `[0,100]` |
+| STOP | 0 | 0 | `[0,0]` |
 
-- `X` คือคำสั่งเดินหน้า / ถอยหลัง
-- `Y` คือคำสั่งเลี้ยว
-- ค่าแต่ละแกนต้องเป็นจำนวนเต็มระหว่าง `-100` และ `100`
-- `[0,0]` จะส่งคำสั่ง **STOP** ทันที
+Web App ปรับค่าคำสั่งตาม Speed Slider โดย D-Pad และ Virtual Joystick ใช้รูปแบบเดียวกัน ตารางนี้แสดง **Mapping ของคำสั่ง** ส่วนทิศทางล้อจริงขึ้นอยู่กับการตั้งค่า STM32 และการต่อสายมอเตอร์ด้วย
 
 ### Differential Drive Calculation
 
 ```cpp
-left  = x + y;
-right = x - y;
 
-peak = max(abs(left), abs(right));
-if (peak > 100)
-{
-  left  = left  * 100 / peak;
-  right = right * 100 / peak;
+int left  = x + y;
+
+int right = x - y;
+
+int peak  = max(abs(left), abs(right));
+
+if (peak > 100) {
+
+    left  = left  * 100 / peak;
+
+    right = right * 100 / peak;
+
 }
+
 ```
 
-ใช้เครื่องหมายของผลลัพธ์เป็นทิศทาง (`FORWARD` / `REVERSE`) และค่าสัมบูรณ์เป็น Speed (0–100%)
+เครื่องหมายของผลลัพธ์กำหนดทิศทาง `FORWARD`/`REVERSE` และค่าสัมบูรณ์กำหนดความเร็ว 0–100% โดย ESP32 ส่ง **คำสั่งมอเตอร์ที่คำนวณแล้ว** ไปยัง STM32 ไม่ได้ส่งค่า X/Y ต้นฉบับ
 
 ## 🔄 ESP32 ↔ STM32 UART Protocol
 
-Packet มีขนาด **8 bytes** และ **ไม่ได้ส่งค่า X/Y ต้นฉบับ** ไปยัง STM32 แต่ส่งค่าความเร็วและทิศทางมอเตอร์หลังคำนวณแล้ว
+UART Packet มีขนาด **8 ไบต์** ดังนี้
 
 | Byte | Field | Description |
 |---|---|---|
@@ -141,194 +221,186 @@ Packet มีขนาด **8 bytes** และ **ไม่ได้ส่งค
 | 4 | M2 Speed | `0–100` |
 | 5 | M2 Direction | `0` Coast, `1` Forward, `2` Reverse |
 | 6 | Reserved | `0x00` |
-| 7 | CRC-8 | Polynomial `0x07`, init `0x00`, over bytes 0–6 |
+| 7 | CRC-8 | Poly `0x07`, init `0x00`, bytes 0–6 |
 
-**CRC-8:** ไม่สะท้อนบิต (non-reflected), ไม่มี final XOR
+CRC-8 ใช้รูปแบบ Non-reflected และไม่มี Final XOR
 
 | Command | Hex | Behavior |
 |---|---|---|
-| `CMD_SET_MOTOR` | `0x01` | ส่งความเร็วและทิศทางมอเตอร์ทั้งสอง |
-| `CMD_STOP` | `0x02` | สั่งหยุดมอเตอร์ทั้งสอง |
-| `CMD_HEARTBEAT` | `0x03` | แสดงการสื่อสารขณะเคลื่อนที่ ไม่ใช่คำสั่งต่ออายุ Motor Timeout ฝั่ง STM32 |
+| `CMD_SET_MOTOR` | `0x01` | Motor speed and direction |
+| `CMD_STOP` | `0x02` | Stop both motors |
+| `CMD_HEARTBEAT` | `0x03` | Periodic communication indicator while running |
 
-ไม่มีคำสั่ง `0x04` ใน Firmware เวอร์ชันนี้
+> Motor Timeout ฝั่ง STM32 อาจพิจารณาจากเวลาที่ได้รับ `CMD_SET_MOTOR` ล่าสุด ไม่ใช่ `CMD_HEARTBEAT` ให้ตรวจสอบเงื่อนไขจริงจาก Firmware ของ STM32 Motor Controller
 
-## 🛡 Safety & Failsafe
+## 🛡 ระบบความปลอดภัยและ Failsafe
 
 1. เมื่อรับ `[0,0]` จะส่ง `CMD_STOP` ทันที
-2. หากไม่มีคำสั่ง Joystick ใหม่ภายใน **350 ms** ขณะที่มอเตอร์ทำงาน ESP32 จะส่ง STOP และเข้า Failsafe LED State
-3. เมื่อ TCP Client หลุดการเชื่อมต่อ จะสั่ง STOP และคืนสถานะ Wi-Fi Ready
-4. ระหว่าง Client เชื่อมต่อ หากมอเตอร์หยุดอยู่ จะส่ง `CMD_STOP` ซ้ำทุก **100 ms**
-5. เมื่อมอเตอร์ทำงาน ESP32 จะส่ง `CMD_HEARTBEAT` ทุก **100 ms**; STM32 ยังใช้เวลาได้รับ `CMD_SET_MOTOR` ล่าสุดเพื่อตรวจ Motor Timeout ของตัวเอง
 
-> Failsafe ฝั่ง STM32 ทำงานแยกจาก ESP32; ดู README ของ STM32 Motor Controller
+2. Web App ส่ง `[0,0]` เมื่อปล่อย D-Pad/Joystick หรือเมื่อหน้าเว็บสูญเสีย Focus หรือถูกซ่อนขณะเชื่อมต่อ
+
+3. เมื่อ WebSocket หลุดการเชื่อมต่อ ESP32 จะสั่งหยุดมอเตอร์
+
+4. หากมอเตอร์กำลังทำงานและไม่ได้รับคำสั่งใหม่ภายใน **350 ms** ESP32 จะส่ง STOP และเข้าสถานะ Failsafe LED
+
+5. ระหว่างมี Controller เชื่อมต่อ ESP32 ส่ง `CMD_HEARTBEAT` ทุก **100 ms** เมื่อมอเตอร์ทำงาน หรือส่ง `CMD_STOP` ซ้ำทุก **100 ms** เมื่อหยุด
+
+6. ระบบความปลอดภัยฝั่ง STM32 ทำงานแยกจาก ESP32 และควรตรวจสอบกับ Firmware ของ STM32 โดยตรง
+
+> เพื่อความปลอดภัย ควรยกล้อขึ้นทดสอบทิศทางก่อนนำหุ่นยนต์ลงพื้น การปิด Browser หรือสัญญาณ Wi-Fi หลุดอาจทำให้ส่ง STOP ครั้งสุดท้ายไม่สำเร็จ จึงต้องอาศัย Timeout/Disconnect Failsafe ของ ESP32 เป็นระบบสำรอง
 
 ## 🌈 NeoPixel Status (GPIO48)
 
 | State | Color / Pattern | Meaning |
 |---|---|---|
-| `LED_WIFI_READY` | Blue | AP พร้อมรับการเชื่อมต่อ |
-| `LED_CONNECTED` | Green | TCP Client เชื่อมต่อ / มอเตอร์หยุด |
-| `LED_RUNNING` | Cyan | มีคำสั่งให้มอเตอร์ทำงาน |
-| `LED_FAILSAFE` | Red blinking | Joystick Command Timeout |
+| `LED_WIFI_READY` | Blue | Wi-Fi AP พร้อมใช้งาน |
+| `LED_CONNECTED` | Green | Controller เชื่อมต่อ มอเตอร์หยุด |
+| `LED_RUNNING` | สีฟ้า | มอเตอร์ทำงาน |
+| `LED_FAILSAFE` | สีแดงกะพริบ | คำสั่ง Joystick หมดเวลา |
 
-LED Brightness กำหนดไว้ที่ `40` ตามโค้ด
+กำหนดความสว่าง LED ไว้ที่ `40`
 
-## 💻 Development & Dependencies
+## 💻 เครื่องมือพัฒนาและไลบรารี
 
-- Language: **C++**
-- Framework: **Arduino (ESP32)**
-- Libraries: `WiFi.h`, `Adafruit_NeoPixel.h`, `Arduino.h`
-- UART class: `HardwareSerial(1)`
-- USB Serial Debug: **115200 baud**
+- **Language:** C++
 
+- **Framework:** Arduino Framework for ESP32
 
-## 🧰 Development Tools & Environment
+- **IDE:** Visual Studio Code + PlatformIO
 
-This firmware was developed using **Visual Studio Code and PlatformIO**, with the **Arduino Framework for ESP32**.
+- **ESP32 libraries:** `Arduino.h`, `WiFi.h`, `WebServer.h`, `WebSocketsServer.h`, `LittleFS.h`, `Adafruit_NeoPixel.h`
 
-PlatformIO is used for project management, dependency handling, firmware compilation, and uploading firmware to the ESP32-S3.
+- **Web App:** HTML, CSS, JavaScript (stored in LittleFS)
 
-### Development Tools
+- **UART:** `HardwareSerial(1)`
 
-| Tool | Purpose |
-|---|---|
-| **Visual Studio Code** | Main IDE for firmware development and Git integration |
-| **PlatformIO IDE** | Project management, building, uploading, and serial monitoring |
-| **Arduino Framework** | Application framework for ESP32-S3 |
-| **ESP32 Arduino Core** | Hardware support, Wi-Fi, UART, and system APIs |
-| **Adafruit NeoPixel Library** | RGB LED status indication |
-| **USB Serial Monitor** | Firmware debugging and runtime logs |
+- **Debug:** USB Serial Monitor, 115200 baud
 
-### Recommended VS Code Extensions
+โปรเจกต์ใช้ `platformio.ini` สำหรับกำหนดบอร์ด ไลบรารี Partition และ LittleFS โดย **ควรคงค่าที่ทดสอบกับ ESP32-S3 N16R8 แล้ว** ไม่เปลี่ยนเป็นค่าตัวอย่างทั่วไป
 
-| Extension | Purpose |
-|---|---|
-| **PlatformIO IDE** | ESP32 development, build, upload, and serial monitoring |
-| **C/C++ (Microsoft)** | C/C++ IntelliSense and code navigation |
-
-### Development Workflow
+## 📂 โครงสร้างโปรเจกต์
 
 ```text
-Visual Studio Code
-       |
-       v
-PlatformIO IDE
-       |
-       v
-Arduino Framework
-       |
-       v
-Firmware Development
-(Wi-Fi / TCP / UART / NeoPixel)
-       |
-       v
-PlatformIO Build
-       |
-       v
-Upload to ESP32-S3
-       |
-       v
-Serial Monitor
-       |
-       v
-Hardware Testing
-(ESP32-S3 <--> STM32F446RCTx)
-```
 
-### Build & Upload Using PlatformIO
-
-Open the project folder in Visual Studio Code and ensure that PlatformIO IDE is installed.
-
-Build firmware:
-
-```bash
-pio run
-```
-
-Upload firmware:
-
-```bash
-pio run -t upload
-```
-
-Open Serial Monitor:
-
-```bash
-pio device monitor -b 115200
-```
-
-### PlatformIO Project Configuration
-
-The project uses a `platformio.ini` file to define its target board, framework, dependencies, and build settings.
-
-Example configuration structure:
-
-```ini
-[env:esp32s3]
-platform = espressif32
-board = <your_actual_board_id>
-framework = arduino
-monitor_speed = 115200
-
-lib_deps =
-    adafruit/Adafruit NeoPixel
-```
-
-> **Note:** Replace `<your_actual_board_id>` with the board identifier used in the project's existing `platformio.ini`. The configuration above is an example, not a replacement for the tested project settings.
-
-### Project Structure
-
-```text
 ESP32_S3/
+
+├── data/
+
+│   ├── index.html
+
+│   ├── style.css
+
+│   ├── app.js
+
+│   └── manifest.webmanifest
+
 ├── include/
+
 ├── lib/
+
 ├── src/
+
 │   └── main.cpp
+
 ├── test/
+
 ├── platformio.ini
+
 └── README.md
+
 ```
 
----
+ไฟล์ `manifest.webmanifest` ใช้สำหรับ PWA โดย Firmware ต้องมี HTTP Route สำหรับให้บริการไฟล์นี้
 
-### Getting Started
+## 🚀 การ Build, Upload และใช้งาน (PlatformIO)
 
-1. เปิดโปรเจกต์ ESP32-S3 ด้วย Arduino IDE หรือ PlatformIO ที่ตั้งค่าสำหรับบอร์ด ESP32-S3 N16R8 ให้ตรงกับฮาร์ดแวร์
-2. ติดตั้งไลบรารี **Adafruit NeoPixel**
-3. ตรวจสอบการต่อ GPIO17 → STM32 PA10 และ GND ร่วมกัน
-4. Build และ Upload Firmware ลง ESP32-S3
-5. เปิด Serial Monitor 115200 baud เพื่ออ่าน SSID / IP / TCP Port
-6. เชื่อมต่อมือถือหรือ TCP Client เข้ากับ AP `MUT_robot_XXXX`
-7. ส่งข้อความ Joystick ตามรูปแบบ `[X,Y]\n` ไปที่ TCP Port 8080
+เปิดโฟลเดอร์โปรเจกต์ใน VS Code ที่ติดตั้ง PlatformIO แล้ว
 
-ตัวอย่าง Debug Log:
+**1. Build Firmware**
+
+```bash
+
+pio run
+
+```
+
+**2. Upload Firmware** (เมื่อแก้ไข `main.cpp` หรือการตั้งค่า Firmware)
+
+```bash
+
+pio run -t upload
+
+```
+
+**3. Upload LittleFS Web App** (เมื่อแก้ไขไฟล์ใน `data/`)
+
+```bash
+
+pio run -t uploadfs
+
+```
+
+**4. เปิด Serial Monitor**
+
+```bash
+
+pio device monitor -b 115200
+
+```
+
+**5. เชื่อมต่อและควบคุมหุ่นยนต์**
+
+1. เชื่อมต่อมือถือหรือคอมพิวเตอร์ **เพียง 1 Device** กับ Wi-Fi `MUT_robot_XXXX` รหัสผ่าน `12345678`
+
+2. เปิด `http://192.168.4.1/` (หรือ IP จริงของ AP)
+
+3. หมุนหน้าจอเป็นแนวนอนหากจำเป็น
+
+4. ตรวจสอบ WebSocket Port `81` แล้วกด **Connect Robot**
+
+5. ใช้ D-Pad/Joystick และ Speed Slider เพื่อควบคุม เมื่อปล่อยจะส่ง STOP
+
+ตัวอย่าง Serial Monitor Log (เพื่ออธิบายรูปแบบ ไม่ใช่ Log ที่ยืนยันจากการทดสอบ):
 
 ```text
-[WIFI] SSID: MUT_robot_XXXX IP: <AP_IP>
-[TCP] Port 8080
-[TCP] Client connected
+
+[FS] LittleFS mounted OK
+
+[WIFI] Max AP Clients: 1
+[WIFI] SSID: MUT_robot_XXXX IP: 192.168.4.1
+
+[HTTP] Port 80 / [WebSocket] Port 81
+
+[WS] Controller 0 connected
+
 [APP] X:100 Y:0
+
 [APP] X:0 Y:0
+
 [MOTOR] STOP -> STM32
+
 ```
 
-> ตัวอย่างข้างต้นเป็นรูปแบบข้อความที่ Firmware พิมพ์ออกมา โดย `<AP_IP>` และค่า Joystick ขึ้นอยู่กับอุปกรณ์/คำสั่งจริง
+> หาก Web App ไม่แสดงหรือยังเป็นเวอร์ชันเก่า ให้ตรวจสอบการ Mount LittleFS และรัน `pio run -t uploadfs` หาก Browser Cache ค้าง ให้ Reload หน้าเว็บ
 
-## 🔗 Related Project
+## 🔗 โปรเจกต์ที่เกี่ยวข้อง
 
-- **STM32F446RCTx Motor Controller:** โปรเจกต์คู่กัน ทำหน้าที่รับ UART Packet, ตรวจ CRC และขับมอเตอร์ผ่าน DRV8833
-- **Previous project (2025):** [MUT_Robot_L298N](https://github.com/peacepaul1999/MUT_Robot_L298N) — โครงการเดิมที่ใช้ L298N ไม่ใช่ Motor Driver ของเวอร์ชัน 2026
+- **STM32F446RCTx Motor Controller:** รับ UART Packet ตรวจสอบ CRC และควบคุม DRV8833PWR
+
+- **โครงการก่อนหน้า (2025):** [MUT_Robot_L298N](https://github.com/peacepaul1999/MUT_Robot_L298N) — โปรเจกต์เดิมที่ใช้ L298N ซึ่งแตกต่างจาก Motor Driver ของเวอร์ชัน 2026
 
 ## 👨‍🔧 Developer
 
 **Pakprom Naennoi (Peace)**  
+
 Electronics Engineer (Embedded Systems)
 
 **Event:** MUT Robot Open House 2026 — **18 November 2026**  
+
 **Firmware Version:** 1.0.0  
-**Date:** 2026-11-14
 
-## 📄 License
+**README Updated:** 2026-11-16
 
-โปรดระบุ License ตามที่เลือกใช้จริงสำหรับ Repository ใหม่ ไม่อนุมานจาก License ที่ README ของโครงการ L298N ปี 2025 ระบุไว้
+## 📄 License / สัญญาอนุญาต
+
+ให้ระบุ License ตามที่เลือกใช้จริงสำหรับ Repository นี้ โดยไม่อ้างอิง License จากโปรเจกต์ก่อนหน้าโดยอัตโนมัติ

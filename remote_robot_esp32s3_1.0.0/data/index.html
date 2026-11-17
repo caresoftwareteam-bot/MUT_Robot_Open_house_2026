@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"
+    />
+    <title>Robot Controller</title>
+    <link rel="stylesheet" href="./style.css" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+  </head>
+
+  <body>
+    <main class="app">
+      <section class="panel">
+        <div class="top">
+          <div class="field">
+            <label for="ip">IP</label>
+            <input id="ip" type="text" value="192.168.4.1" />
+          </div>
+
+          <div class="field port">
+            <label for="port">port</label>
+            <input id="port" type="number" min="1" max="65535" value="81" />
+          </div>
+
+          <button id="connect">Connect Robot</button>
+        </div>
+
+        <div class="speed">
+          <label for="speed">speed</label>
+          <output id="speedValue">100</output>
+          <input id="speed" type="range" min="0" max="100" value="100" />
+          <div class="coords" id="coords">[X:0, Y:0]</div>
+        </div>
+      </section>
+
+      <div class="status">
+        Connection: <strong id="status">Disconnected</strong>
+      </div>
+
+      <section class="controls">
+        <!-- Direction Control -->
+        <div class="panel control-panel">
+          <div class="dpad">
+            <!-- Forward: X +100 -->
+            <button class="dir up" data-x="100" data-y="0" aria-label="Forward">
+              ⇈
+            </button>
+
+            <!-- Left: Y -100 -->
+            <button class="dir left" data-x="0" data-y="-100" aria-label="Left">
+              ≪
+            </button>
+
+            <!-- Right: Y +100 -->
+            <button
+              class="dir right"
+              data-x="0"
+              data-y="100"
+              aria-label="Right"
+            >
+              ≫
+            </button>
+
+            <!-- Reverse: X -100 -->
+            <button
+              class="dir down"
+              data-x="-100"
+              data-y="0"
+              aria-label="Reverse"
+            >
+              ⇊
+            </button>
+          </div>
+        </div>
+
+        <!-- Joystick Control -->
+        <div class="panel control-panel">
+          <div id="joy" class="joy-base">
+            <div id="knob" class="joy-knob">Joystick</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>

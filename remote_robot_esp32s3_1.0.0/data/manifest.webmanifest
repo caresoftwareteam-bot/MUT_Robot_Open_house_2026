@@ -1,0 +1,7 @@
+{
+  "name": "Robot Controller",
+  "short_name": "Robot",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "landscape"
+}

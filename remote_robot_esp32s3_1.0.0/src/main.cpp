@@ -1,27 +1,40 @@
 /**
  * @file           : main.cpp
- * @brief          : ESP32-S3 Robot Wi-Fi Communication Controller
+ * @brief          : ESP32-S3 Robot Wi-Fi Web Controller
  * @version        : 1.0.0
- * @author         : Pakprom Naennoi (Peace) , Electronics Engineer (Embedded Systems)
- * @date           : 2026-11-14
+ * @author         : Pakprom Naennoi (Peace), Electronics Engineer (Embedded Systems)
+ * @date           : 2026-11-16
  *
- * @brief          : Main communication logic for the robot motor controller
- * @note           : This firmware is designed for the MUT Robot Open House 2026 (18-Nov-2026) event.
+ * @note           : Developed for MUT Robot Open House 2026 (18-Nov-2026).
+ *
  * @details
- * - ESP32-S3 Wi-Fi Access Point
- * - TCP Socket Server (Port 8080)
- * - Joystick Command Parsing (X/Y)
- * - Differential Drive Motor Calculation
+ * - ESP32-S3 Wi-Fi Access Point (AP Mode)
+ * - Wi-Fi AP Channel 1, Maximum 1 Connected Device
+ * - Single Active WebSocket Controller (1 Connection)
+ * - Reject Additional WebSocket Controllers (BUSY)
+ * - HTTP Web Server (Port 80)
+ * - WebSocket Communication Server (Port 81)
+ * - LittleFS Web Application Hosting (HTML/CSS/JavaScript)
+ * - Web-Based D-Pad and Virtual Joystick Control
+ * - Landscape Web Application Interface
+ * - Joystick Command Parsing [X,Y]
+ * - Differential Drive Motor Control
  * - UART Communication with STM32F446RCTx
- * - UART CRC-8 Protocol
- * - Joystick Timeout Failsafe
+ * - UART CRC-8 Communication Protocol
+ * - Motor Stop on Controller Disconnection
+ * - Joystick Command Timeout Failsafe (350 ms)
+ * - Periodic Communication Heartbeat (100 ms)
  * - NeoPixel RGB Status Indicator
  */
+
 
 #define Firmware_Version "1.0.0"
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WebServer.h>
+#include <WebSocketsServer.h>
+#include <LittleFS.h>
 #include <Adafruit_NeoPixel.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,6 +62,11 @@ Adafruit_NeoPixel rgb(1, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 #define COMMAND_TIMEOUT_MS 350U
 #define REPEAT_INTERVAL_MS 100U
 #define TCP_BUFFER_SIZE 64U
+#define HTTP_PORT 80U
+#define WS_PORT 81U
+
+#define WIFI_AP_CHANNEL 1U
+#define WIFI_MAX_CLIENTS 1U
 
 static const char *get_serial_number()
 {
@@ -64,16 +82,14 @@ static const char *get_serial_number()
 
 static const char *ssid = get_serial_number();
 static const char *password = "12345678";
-WiFiServer server(8080);
-WiFiClient client;
+WebServer http(HTTP_PORT);
+WebSocketsServer ws(WS_PORT);
+static uint8_t controllerId = 0xFF;
 
 static bool clientActive = false;
 static bool motorActive = false;
 static uint32_t lastCommand = 0;
 static uint32_t lastPeriodicTx = 0;
-static char rxBuffer[TCP_BUFFER_SIZE];
-static size_t rxIndex = 0;
-static bool rxOverflow = false;
 
 enum LED_Status
 {
@@ -221,7 +237,7 @@ static bool Parse_Joystick(const char *input, int *x, int *y)
 
   while (isspace((unsigned char)*p))
     ++p;
-    
+
   if (*p)
     return false;
 
@@ -244,73 +260,51 @@ static void Process_Command(const char *text)
   Serial.printf("[APP] X:%d Y:%d\r\n", x, y);
 }
 
-static void TCP_Process()
+static void WS_Event(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
 {
-  if (!clientActive)
+  switch (type)
   {
-    WiFiClient next = server.available();
-    if (next)
+  case WStype_CONNECTED:
+    if (clientActive)
     {
-      client = next;
-      client.setNoDelay(true);
-      clientActive = true;
-      rxIndex = 0;
-      rxOverflow = false;
-      lastCommand = millis();
-      Motor_Stop();
-      Serial.println("[TCP] Client connected");
+      ws.sendTXT(num, "BUSY");
+      ws.disconnect(num);
+      return;
     }
-    return;
-  }
-
-  WiFiClient extra = server.available();
-  if (extra)
-    extra.stop();
-
-  if (!client.connected())
-  {
+    controllerId = num;
+    clientActive = true;
+    lastCommand = millis();
     Motor_Stop();
-    client.stop();
-    clientActive = false;
-    rxIndex = 0;
-    rxOverflow = false;
-    LED_SetStatus(LED_WIFI_READY);
-    Serial.println("[TCP] Client disconnected");
-    return;
-  }
-
-  while (client.available())
-  {
-    char c = (char)client.read();
-    if (c == '\n')
+    Serial.printf("[WS] Controller %u connected\r\n", num);
+    break;
+  case WStype_DISCONNECTED:
+    if (clientActive && num == controllerId)
     {
-      if (rxOverflow)
-      {
-        Motor_Stop();
-        Serial.println("[TCP] Buffer overflow");
-      }
-      else if (rxIndex)
-      {
-        rxBuffer[rxIndex] = '\0';
-        Process_Command(rxBuffer);
-      }
-      rxIndex = 0;
-      rxOverflow = false;
+      Motor_Stop();
+      clientActive = false;
+      controllerId = 0xFF;
+      LED_SetStatus(LED_WIFI_READY);
+      Serial.println("[WS] Controller disconnected");
     }
-    else if (c == '\r')
-    { /* CRLF accepted */
-    }
-    else if (!rxOverflow)
+    break;
+  case WStype_TEXT:
+    if (!clientActive || num != controllerId)
+      return;
+    if (length == 0 || length >= TCP_BUFFER_SIZE || memchr(payload, 0, length))
     {
-      if (rxIndex + 1U < TCP_BUFFER_SIZE)
-        rxBuffer[rxIndex++] = c;
-      else
-      {
-        rxOverflow = true;
-        rxIndex = 0;
-        Motor_Stop();
-      }
+      Motor_Stop();
+      Serial.println("[WS] Invalid message length/content");
+      return;
     }
+    {
+      char command[TCP_BUFFER_SIZE];
+      memcpy(command, payload, length);
+      command[length] = '\0';
+      Process_Command(command);
+    }
+    break;
+  default:
+    break;
   }
 }
 
@@ -348,7 +342,8 @@ void setup()
   Serial.printf("[INFO] Build Date: %s %s\r\n", __DATE__, __TIME__);
 
   WiFi.mode(WIFI_AP);
-  if (!WiFi.softAP(ssid, password))
+
+  if (!WiFi.softAP(ssid, password, WIFI_AP_CHANNEL, 0, WIFI_MAX_CLIENTS))
   {
     Serial.println("[WIFI] AP failed");
     while (true)
@@ -362,16 +357,100 @@ void setup()
     }
   }
 
+  Serial.printf("[WIFI] Max AP Clients: %u\r\n", WIFI_MAX_CLIENTS);
+
   LED_SetStatus(LED_WIFI_READY);
-  server.begin();
+
+  if (LittleFS.begin(false))
+  {
+    Serial.println("[FS] LittleFS mounted OK");
+
+    File root = LittleFS.open("/");
+    File file = root.openNextFile();
+
+    while (file)
+    {
+      Serial.printf("[FS] %s (%u bytes)\n",
+                    file.name(),
+                    (unsigned)file.size());
+
+      file = root.openNextFile();
+    }
+  }
+  else
+  {
+    Serial.println("[FS] LittleFS mount FAILED");
+  }
+
+  http.on("/", HTTP_GET, []()
+          {
+    File f = LittleFS.open("/index.html", "r");
+
+    if (!f)
+    {
+        http.send(500, "text/plain",
+                  "Missing index.html in LittleFS");
+        return;
+    }
+
+    http.streamFile(f, "text/html; charset=utf-8");
+    f.close(); });
+
+  http.on("/style.css", HTTP_GET, []()
+          {
+    File f = LittleFS.open("/style.css", "r");
+
+    if (!f)
+    {
+        http.send(404, "text/plain", "Missing CSS");
+        return;
+    }
+
+    http.streamFile(f, "text/css; charset=utf-8");
+    f.close(); });
+
+  http.on("/app.js", HTTP_GET, []()
+          {
+    File f = LittleFS.open("/app.js", "r");
+
+    if (!f)
+    {
+        http.send(404, "text/plain", "Missing JS");
+        return;
+    }
+
+    http.streamFile(f, "application/javascript; charset=utf-8");
+    f.close(); });
+
+  http.on("/manifest.webmanifest", HTTP_GET, []()
+          {
+  File f = LittleFS.open("/manifest.webmanifest", "r");
+
+  if (!f) {
+    http.send(404, "text/plain", "Manifest not found");
+    return;
+  }
+
+  http.streamFile(f, "application/manifest+json");
+  f.close(); });
+
+  http.onNotFound([]()
+                  { http.send(404, "text/plain", "Not Found"); });
+
+  http.begin();
+  ws.begin();
+  ws.onEvent(WS_Event);
+
   Serial.printf("[WIFI] SSID: %s IP: %s\r\n", ssid, WiFi.softAPIP().toString().c_str());
-  Serial.println("[TCP] Port 8080");
+  Serial.println("[HTTP] Port 80 / [WebSocket] Port 81");
+
   Motor_Stop();
 }
 
 void loop()
 {
-  TCP_Process();
+  http.handleClient();
+  ws.loop();
   Safety_Process();
   LED_Process();
 }
