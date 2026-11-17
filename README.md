@@ -46,25 +46,79 @@
            │
        DC Motor × 2
 ```
-- **Wi-Fi AP Connection Limit:** จำกัดการเชื่อมต่อ Wi-Fi AP สูงสุด **1 Device** ต่อหุ่นยนต์ เมื่ออุปกรณ์เดิมตัดการเชื่อมต่อ ระบบจึงเปิดรับอุปกรณ์ใหม่ โดย WebSocket จำกัด Active Controller ไว้ที่ 1 Connection
+
 - **ESP32-S3 → STM32:** Packet 8 ไบต์, Header `0xA5`, คำสั่ง `0x01` Motor / `0x02` Stop / `0x03` Heartbeat และ CRC-8 Polynomial `0x07`
 - **ESP32-S3 Failsafe:** Joystick Timeout `350 ms`, ส่ง STOP เมื่อปล่อย Joystick หรือ WebSocket หลุด และส่ง STOP/Heartbeat เป็นระยะทุก `100 ms` ตามสถานะ
 - **STM32 Failsafe:** Motor Command Timeout `500 ms` โดย Heartbeat ไม่ต่ออายุการขับเคลื่อน
+- **การควบคุม:** รับ `[X,Y]` ผ่าน WebSocket โดย `X` เป็นเดินหน้า/ถอยหลัง และ `Y` เป็นเลี้ยวซ้าย/ขวา; จำกัดผู้ควบคุมที่ใช้งานพร้อมกันหนึ่งราย
 
+## 🌐 Web Controller (ระบบปัจจุบัน)
 
-## 📱 Android Application
+Web App จัดเก็บอยู่ใน **LittleFS** ของ ESP32-S3 ประกอบด้วย HTML, CSS และ JavaScript จึงไม่ต้องติดตั้งแอป Android เพื่อควบคุมหุ่นยนต์
 
-<p align="center">
-  <img src="docs/images/app_icon.jpg" alt="MUT Robot Controller App Icon" width="96">
-</p>
+| รายการ | การตั้งค่า |
+|---|---|
+| Wi-Fi Mode | Access Point (AP) |
+| SSID | `MUT_robot_XXXX` (สร้างจาก eFuse MAC) |
+| Password | `12345678` |
+| AP IP เริ่มต้น | `192.168.4.1` |
+| Web Interface | `http://192.168.4.1/` (HTTP Port `80`) |
+| WebSocket | Port `81` |
+| Web Assets | `data/index.html`, `data/style.css`, `data/app.js` |
+| PWA Manifest | `data/manifest.webmanifest` (ขอแสดงผลแนวนอนเมื่อรองรับ) |
 
-แอปพลิเคชันสำหรับควบคุมหุ่นยนต์ผ่าน Wi-Fi / TCP
+### วิธีใช้งาน
 
-**ดาวน์โหลดแอปพลิเคชัน Android**
+1. เปิดหุ่นยนต์และรอให้ ESP32-S3 เปิด Wi-Fi AP
+2. เชื่อมต่อมือถือหรือคอมพิวเตอร์กับ `MUT_robot_XXXX` โดยใช้รหัสผ่าน `12345678`
+3. เปิดเบราว์เซอร์ไปที่ **`http://192.168.4.1/`**
+4. ใช้ **Virtual Joystick** หรือ **D-Pad** ควบคุมทิศทาง และปรับความเร็วด้วย Slider
+5. ปล่อยปุ่มหรือ Joystick เพื่อส่งคำสั่งหยุด ตรวจสอบสถานะการเชื่อมต่อก่อนใช้งานจริง
 
-[📥 Download APK](app/robotcontroller.apk)
+> **หมายเหตุ:** Web App ออกแบบสำหรับการใช้งานแนวนอน (Landscape) และมี PWA Manifest แต่การบังคับหมุนหน้าจอขึ้นอยู่กับเบราว์เซอร์และวิธีเปิดใช้งาน ไม่รับประกันว่าเบราว์เซอร์ทุกตัวจะล็อกแนวนอนได้
 
-**สแกน QR Code เพื่อดาวน์โหลด**
+### การอัปโหลด Firmware และ Web App
+
+เปิดโฟลเดอร์ `remote_robot_esp32s3_1.0.0/` ใน VS Code + PlatformIO แล้วใช้คำสั่ง:
+
+```bash
+pio run
+pio run -t upload
+pio run -t uploadfs
+pio device monitor -b 115200
+```
+
+> **สำคัญ:** เมื่อแก้ไฟล์ในโฟลเดอร์ `data/` ต้องอัปโหลด LittleFS ใหม่ด้วย `pio run -t uploadfs` โดยใช้ Partition Scheme ที่รองรับ LittleFS ตาม `platformio.ini` ของโปรเจกต์จริง
+
+### รูปแบบคำสั่งควบคุม
+
+WebSocket ส่งข้อความข้อความรูปแบบ `[X,Y]` โดยแต่ละแกนเป็นจำนวนเต็ม `-100` ถึง `100` เช่น:
+
+| คำสั่ง | ความหมาย |
+|---|---|
+| `[100,0]` | เดินหน้า |
+| `[-100,0]` | ถอยหลัง |
+| `[0,-100]` | เลี้ยวซ้าย |
+| `[0,100]` | เลี้ยวขวา |
+| `[0,0]` | หยุด |
+
+ESP32-S3 คำนวณความเร็วมอเตอร์ด้วย `left = x + y` และ `right = x - y` พร้อม Normalize ให้ไม่เกิน 100% ก่อนส่ง UART Packet ไปยัง STM32
+
+## 📱 Web Application — QR Code Access
+
+ควบคุมหุ่นยนต์ผ่าน **Web Application** โดยไม่จำเป็นต้องติดตั้งแอปพลิเคชัน Android หรือ iOS
+
+Web Controller รองรับ **Virtual Joystick, D-Pad และ Speed Control** พร้อมการแสดงผลแบบ Landscape สำหรับการควบคุมหุ่นยนต์
+
+### 🌐 วิธีเข้าใช้งาน
+
+1. เชื่อมต่อ Wi-Fi ของหุ่นยนต์ `MUT_robot_XXXX`
+2. สแกน QR Code ด้านล่างเพื่อเปิด Web Controller
+3. ใช้ Joystick หรือ D-Pad เพื่อควบคุมการเคลื่อนที่
+
+**Web Controller URL:** `http://192.168.4.1`
+
+### 📷 QR Code — Web Controller
 
 <p align="center">
   <img
@@ -74,8 +128,8 @@
   >
 </p>
 
-
 > **หมายเหตุ:** QR Code ใช้สำหรับเปิด Web Controller หลังจากเชื่อมต่อ Wi-Fi ของหุ่นยนต์แล้ว โดยระบบสื่อสารผ่าน WebSocket Port 81 และ HTTP Port 80
+
 
 ## 🛠️ ฮาร์ดแวร์และเอกสาร
 
